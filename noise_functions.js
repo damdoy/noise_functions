@@ -12,6 +12,7 @@ var Parameters = function() {
   this.noise_type = 'linear';
   this.lattice_size = 100;
   this.nb_recursions = 1;
+  this.roughness = 0.4;
 };
 
 //calculates iterations of noise and draw it
@@ -42,6 +43,10 @@ function draw(params)
       else if(params.noise_type == 'wood')
       {
          array[i] = improved_perlin_noise(width, height, Math.ceil(params.lattice_size/(i+1)));
+      }
+      else if(params.noise_type == 'diamond-square')
+      {
+         array[i] = diamond_square(width, height, params.roughness);
       }
    }
 
@@ -252,16 +257,121 @@ function voronoi_noise(size_x, size_y, size_sub) {
    return array;
 }
 
+function add_roughness_avg(avg, roughness){
+   var ret = avg+(Math.random()-0.5)*(roughness);
+   ret = ret<0?0:(ret>1?1:ret);
+   return ret;
+}
+
+function diamond_square(size_x, size_y, roughness) {
+   var array = [];
+
+   for (var i = 0; i < size_x; i++) {
+      array[i] = [];
+      for (var j = 0; j < size_y; j++) {
+         array[i][j] = 0;
+      }
+   }
+
+   var max_size = 1024; //only works with powers of 2
+
+   //initial square with random seed values
+   array[0][0] = Math.random();
+   array[0][max_size] = Math.random();
+   array[max_size][0] = Math.random();
+   array[max_size][max_size] = Math.random();
+
+
+   for (var i = 0; i < 12; i++) {
+
+      var square_size = Math.ceil((max_size)/Math.pow(2, i));
+
+      if(square_size <= 1){
+         continue;
+      }
+
+      //diamond
+      var avg_diamond = 0
+      for (var x = 0; x < max_size-1; x+=square_size) {
+         for (var y = 0; y < max_size-1; y+=square_size) {
+            var avg = 0.25*array[x][y]+0.25*array[x][y+square_size]+0.25*array[x+square_size][y]+0.25*array[x+square_size][y+square_size];
+            avg = add_roughness_avg(avg, roughness/(i+1));
+            avg_diamond = avg;
+            array[x+Math.ceil((square_size)/2)][y+Math.ceil((square_size)/2)] = avg;
+         }
+      }
+
+      //square
+      for (var x = 0; x < max_size-1; x+=square_size) {
+         for (var y = 0; y < max_size-1; y+=square_size) {
+            var avg = 0;
+            var avg_diamond = array[x+Math.ceil((square_size)/2)][y+Math.ceil((square_size)/2)];
+            if(x == 0){ //only draw left pixels when at borders
+               avg = (array[x][y]+array[x][y+square_size]+avg_diamond)/3;
+               avg = add_roughness_avg(avg, roughness/(i+1));
+               array[x][y+Math.ceil((square_size)/2)] = avg;
+            }
+
+            if(y == 0){ //only draw top pixels when at borders
+               avg = (array[x][y]+array[x+square_size][y]+avg_diamond)/3;
+               avg = add_roughness_avg(avg, roughness/(i+1));
+               array[x+Math.ceil((square_size)/2)][y] = avg;
+            }
+
+            //bottom
+            if(y+square_size < max_size-1){ //still one square under this one
+               avg = (avg_diamond+array[x][y+square_size]+array[x+square_size][y+square_size]+array[x+Math.ceil((square_size)/2)][y+Math.ceil(3*(square_size)/2)])/4;
+            }
+            else{
+               avg = (avg_diamond+array[x][y+square_size]+array[x+square_size][y+square_size])/3;
+            }
+            avg = add_roughness_avg(avg, roughness/(i+1));
+            array[x+Math.ceil(square_size/2)][y+square_size] = avg;
+
+            //right
+            if(x+square_size < max_size-1){ //still one square on the right of this one
+               avg = (avg_diamond+array[x+square_size][y]+array[x+square_size][y+square_size]+array[x+Math.ceil(3*(square_size)/2)][y+Math.ceil((square_size)/2)])/4
+            }
+            else{
+               avg = (avg_diamond+array[x+square_size][y]+array[x+square_size][y+square_size])/3;
+            }
+            avg = add_roughness_avg(avg, roughness/(i+1));
+            array[x+square_size][y+Math.ceil((square_size)/2)] = avg;
+         }
+      }
+
+
+   }
+
+   return array;
+}
+
 //set up gui to modify parameters
 var params = new Parameters();
 var gui = new dat.GUI();
-var controller_type = gui.add(params, 'noise_type', [ 'linear', 'cubic', 'perlin', 'improved_perlin', 'voronoi', 'wood' ] );
-var controller_size = gui.add(params, 'lattice_size', 1, 600, 1);
-var controller_rec = gui.add(params, 'nb_recursions', 1, 10, 1);
+var controller_type = gui.add(params, 'noise_type', [ 'linear', 'cubic', 'perlin', 'improved_perlin', 'voronoi', 'wood', 'diamond-square' ] );
+var fold_noise = gui.addFolder('params');
+var controller_size = fold_noise.add(params, 'lattice_size', 1, 600, 1);
+var controller_rec = fold_noise.add(params, 'nb_recursions', 1, 10, 1);
+var fold_diamond_square = gui.addFolder('diamond-square params');
+var controller_rough = fold_diamond_square.add(params, 'roughness', 0, 1, 0.01);
+fold_diamond_square.hide();
+fold_noise.show();
+fold_noise.open();
 
 draw(params);
 
 controller_type.onFinishChange(function(value) {
+   if(value == "diamond-square"){
+      fold_noise.hide();
+      fold_diamond_square.show();
+      fold_diamond_square.open();
+   }
+   else{
+      fold_diamond_square.hide();
+      fold_noise.show();
+      fold_noise.open();
+   }
   draw(params);
 });
 
@@ -270,5 +380,9 @@ controller_size.onFinishChange(function(value) {
 });
 
 controller_rec.onFinishChange(function(value) {
+  draw(params);
+});
+
+controller_rough.onFinishChange(function(value) {
   draw(params);
 });
